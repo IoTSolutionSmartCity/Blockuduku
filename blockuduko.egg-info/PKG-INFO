@@ -1,3 +1,20 @@
+Metadata-Version: 2.4
+Name: blockuduko
+Version: 0.1.0
+Summary: Blockudoku game engine and RL training environment
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.26
+Requires-Dist: gymnasium>=0.29
+Requires-Dist: stable-baselines3>=2.3
+Requires-Dist: sb3-contrib>=2.3
+Requires-Dist: torch>=2.0
+Requires-Dist: tensorboard>=2.14
+Requires-Dist: tqdm>=4.66
+Requires-Dist: rich>=13.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+
 # Blockuduko
 
 A Python implementation of Blockudoku with a Gymnasium RL environment and MaskablePPO training pipeline.
