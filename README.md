@@ -2,25 +2,6 @@
 
 An [OpenAI Gym](https://github.com/openai/gym) environment for **Block Sudoku**, plus scripts to train a PPO reinforcement-learning agent and watch it play in a local web UI.
 
-For background on the game and original environment design, see [this write-up](https://drakeor.com/2020/11/01/block-sudoku/).
-
----
-
-## Game Overview
-
-Block Sudoku is played on a 9×9 grid (like Sudoku). Each round you receive **3 tetris-like blocks** and place them one at a time anywhere on the board, as long as they do not overlap existing pieces.
-
-![Sample Board Arrangement](https://drakeor.com/content/images/2020/10/BlockSudokuBoard.PNG)
-
-Unlike Tetris, blocks **cannot be rotated**. You score points by clearing filled rows, columns, or 3×3 sub-squares:
-
-![Valid Clears](https://drakeor.com/content/images/2020/10/validclears.PNG)
-
-The game ends when **no remaining block** from the current tray can be placed legally:
-
-![invalid move example](https://drakeor.com/content/images/2020/11/invalidmove_fixed.png)
-
----
 
 ## Environment Specification
 
@@ -29,7 +10,7 @@ The game ends when **no remaining block** from the current tray can be placed le
 | Registered ID | `blocksudoku-v0` |
 | Observation space | `Box(0, 1, shape=(15, 15, 1), dtype=uint8)` |
 | Action space | `Discrete(243)` — 3 blocks × 9 rows × 9 columns |
-| Max steps per episode | 2000 |
+| Episode ends when | No valid moves remain (no step cap) |
 
 ### Observation layout (15×15)
 
@@ -65,7 +46,6 @@ y_pos     = remainder % 9       # column on the board
 | Invalid block index | `-5` |
 | Invalid placement | `-5` |
 | Game over | `-10` |
-| Max steps reached | `0` (episode ends) |
 
 ### Valid moves helper
 
