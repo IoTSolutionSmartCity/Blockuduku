@@ -1,33 +1,240 @@
+# Gym Blockudoku
 
-# Overview
+An [OpenAI Gym](https://github.com/openai/gym) environment for **Block Sudoku**, plus scripts to train a PPO reinforcement-learning agent and watch it play in a local web UI.
 
-The BlockSudoku environment is for use with [OpenAI Gym](https://github.com/openai/gym). Yoiu can find more details about the implementation from [this webpage](https://drakeor.com/2020/11/01/block-sudoku/).
+For background on the game and original environment design, see [this write-up](https://drakeor.com/2020/11/01/block-sudoku/).
 
-Block Sudoku is a game arranged like a traditional Sudoku board, and each "round", you place 3 tetris-like blocks on the board. They can be anywhere on the board as long as they don't collide with an existing piece on the board. An example is below:
+---
+
+## Game Overview
+
+Block Sudoku is played on a 9×9 grid (like Sudoku). Each round you receive **3 tetris-like blocks** and place them one at a time anywhere on the board, as long as they do not overlap existing pieces.
 
 ![Sample Board Arrangement](https://drakeor.com/content/images/2020/10/BlockSudokuBoard.PNG)
 
-
-But unlike Tetris, you cannot rotate the blocks. You gain points by clearing the blocks off the board. You can clear blocks either filling up a row, column, or one of the 3x3 squares. All of the following arrangements below are valid for clearing a line or block of blocks.
+Unlike Tetris, blocks **cannot be rotated**. You score points by clearing filled rows, columns, or 3×3 sub-squares:
 
 ![Valid Clears](https://drakeor.com/content/images/2020/10/validclears.PNG)
 
-
-The game ends when you cannot place all three of the blocks you were given that round such as being left with the T-block on the board below :
+The game ends when **no remaining block** from the current tray can be placed legally:
 
 ![invalid move example](https://drakeor.com/content/images/2020/11/invalidmove_fixed.png)
 
+---
 
-# States / Actions
-Coming soon!
+## Environment Specification
 
-# Installation
-### Installing from PyPI
-	pip install gym-blocksudoku
-	
-### Installing from Source
+| Property | Value |
+|----------|-------|
+| Registered ID | `blocksudoku-v0` |
+| Observation space | `Box(0, 1, shape=(15, 15, 1), dtype=uint8)` |
+| Action space | `Discrete(243)` — 3 blocks × 9 rows × 9 columns |
+| Max steps per episode | 2000 |
 
-	git clone https://github.com/drakeor/gym-blocksudoku
-	cd gym-blocksudoku
-	pip install -e .
+### Observation layout (15×15)
 
+The observation is a single-channel image:
+
+- **Top-left 9×9** — current board state
+- **Right side** — up to 3 available blocks (each up to 5×5), stacked vertically
+
+### Action encoding
+
+Each action is an integer from `0` to `242`:
+
+```
+queue_pos = action // 81        # which block in the tray (0, 1, or 2)
+remainder = action % 81
+x_pos     = remainder // 9      # row on the board
+y_pos     = remainder % 9       # column on the board
+```
+
+| Action range | Block slot |
+|--------------|------------|
+| 0–80 | Block 1 |
+| 81–161 | Block 2 |
+| 162–242 | Block 3 |
+
+> **Note:** After placing a block it is removed from the tray. If only 1 block remains, actions referencing slot 1 or 2 are illegal (`invalid action (queue)`).
+
+### Rewards
+
+| Event | Reward |
+|-------|--------|
+| Valid placement | `cleared_lines² × 10 + 1` |
+| Invalid block index | `-5` |
+| Invalid placement | `-5` |
+| Game over | `-10` |
+| Max steps reached | `0` (episode ends) |
+
+### Valid moves helper
+
+The environment exposes `get_valid_action_space()` on the unwrapped env, returning a length-243 mask where `1` means the action is legal and `0` means it is not.
+
+```python
+import gym
+import gym_blocksudoku
+
+env = gym.make("blocksudoku-v0", disable_env_checker=True)
+obs = env.reset()
+
+valid_mask = env.unwrapped.get_valid_action_space()
+legal_actions = valid_mask.nonzero()[0]
+```
+
+---
+
+## Installation
+
+### From PyPI
+
+```bash
+pip install gym-blocksudoku
+```
+
+### From source (this repo)
+
+```bash
+git clone https://github.com/drakeor/gym-blocksudoku
+cd gym-blocksudoku
+pip install -e .
+```
+
+### RL + web UI dependencies
+
+Training and the Flask viewer require additional packages:
+
+```bash
+pip install stable-baselines3 shimmy flask tensorboard
+```
+
+---
+
+## Project Structure
+
+```
+gym-blocksudoku/
+├── gym_blocksudoku/          # Gym environment package
+│   ├── __init__.py           # Registers blocksudoku-v0
+│   └── envs/
+│       └── blocksudoku_env.py
+├── train.py                  # Train a new PPO agent from scratch
+├── resume_train.py           # Continue training an existing model
+├── app.py                    # Flask server + AI viewer
+├── templates/
+│   └── index.html            # Web UI (Tailwind CSS)
+├── ppo_blockudoku_agent.zip  # Trained model (after running train.py)
+└── blocksudoku_tensorboard/  # TensorBoard logs
+```
+
+---
+
+## Quick Start — Use the Environment
+
+```python
+import gym
+import gym_blocksudoku
+
+env = gym.make("blocksudoku-v0", disable_env_checker=True)
+obs = env.reset()
+
+for _ in range(10):
+    action = env.action_space.sample()
+    obs, reward, done, info = env.step(action)
+    if done:
+        obs = env.reset()
+
+env.close()
+```
+
+---
+
+## Training a PPO Agent
+
+Train from scratch with Stable-Baselines3:
+
+```bash
+python train.py
+```
+
+This will:
+
+1. Create the `blocksudoku-v0` environment
+2. Initialize a PPO agent with `MlpPolicy`
+3. Train for **100,000 timesteps**
+4. Save the model as `ppo_blockudoku_agent.zip`
+5. Write TensorBoard logs to `./blocksudoku_tensorboard/`
+
+Monitor training live:
+
+```bash
+tensorboard --logdir ./blocksudoku_tensorboard/
+```
+
+Then open [http://localhost:6006](http://localhost:6006) in your browser.
+
+---
+
+## Resume Training
+
+Continue from an existing checkpoint without resetting the timestep counter (so TensorBoard curves stay continuous):
+
+```bash
+python resume_train.py
+```
+
+This will:
+
+1. Load `ppo_blockudoku_agent.zip`
+2. Train for an additional **1,000,000 timesteps** with `reset_num_timesteps=False`
+3. Show a live terminal progress bar (`progress_bar=True`)
+4. Save the updated model as `ppo_blockudoku_agent_v2.zip` (original kept as backup)
+
+---
+
+## Web Testing Interface
+
+Watch the trained agent play in a browser:
+
+```bash
+python app.py
+```
+
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000).
+
+### How it works
+
+The Flask backend owns the live Gym environment. The frontend only renders state and sends user commands.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Serves the HTML UI |
+| `/api/reset` | POST | Resets the game, returns board + block tray |
+| `/api/ai_move` | POST | Runs `model.predict()`, steps the env, returns new state |
+
+### UI features
+
+- 9×9 board with 3×3 sub-grid borders
+- Block tray showing up to 3 available pieces
+- **Let AI Play Turn** — step one move at a time
+- **Auto-Play AI** — calls `/api/ai_move` every 500 ms
+- Scoreboard with score, reward, last action, and game status
+
+### Invalid-action fallback
+
+If the model predicts an illegal move, the server automatically substitutes a valid action so the game keeps progressing. The UI shows this as e.g. `19 (fallback for 67)`.
+
+---
+
+## Known Limitations
+
+- The environment uses the **classic Gym API** (`obs, reward, done, info`), not Gymnasium's newer 5-tuple format.
+- The action space is fixed at 243 actions, but only a **subset** is legal at any given state. Without action masking, early-trained agents frequently pick invalid moves.
+- Short initial training (100k steps) produces a weak policy. Use `resume_train.py` or train longer for better results.
+- For best performance, consider implementing **action masking** during training so the agent only chooses legal moves.
+
+---
+
+## License
+
+See [LICENSE.md](LICENSE.md).
