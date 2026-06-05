@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blockudoku PPO Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100">
+    <main class="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-6 lg:px-8">
+      <header class="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-black/30 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p class="text-sm font-medium uppercase tracking-[0.3em] text-cyan-300">Gym Blockudoku</p>
+          <h1 class="mt-2 text-3xl font-bold tracking-tight md:text-4xl">PPO Agent Test Bench</h1>
+          <p class="mt-2 max-w-2xl text-sm text-slate-300">
+            Watch <span class="font-semibold text-white">ppo_blockudoku_agent.zip</span> choose actions against the live Flask-managed Gym environment.
+          </p>
+        </div>
+
+        <section class="grid min-w-64 grid-cols-2 gap-3 rounded-2xl bg-slate-900/80 p-4 text-sm">
+          <div>
+            <p class="text-slate-400">Score</p>
+            <p id="score" class="text-2xl font-bold text-white">0</p>
+          </div>
+          <div>
+            <p class="text-slate-400">Reward</p>
+            <p id="reward" class="text-2xl font-bold text-white">0</p>
+          </div>
+          <div>
+            <p class="text-slate-400">Last Action</p>
+            <p id="action" class="font-semibold text-cyan-200">-</p>
+          </div>
+          <div>
+            <p class="text-slate-400">Status</p>
+            <p id="status" class="font-semibold text-emerald-300">Ready</p>
+          </div>
+        </section>
+      </header>
+
+      <section class="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl shadow-black/30">
+          <div id="board" class="mx-auto grid aspect-square w-full max-w-[min(92vw,620px)] grid-cols-9 rounded-2xl border-4 border-slate-500 bg-slate-800 p-2"></div>
+        </div>
+
+        <aside class="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-black/30">
+          <div>
+            <h2 class="text-xl font-bold">Available Blocks</h2>
+            <p class="mt-1 text-sm text-slate-400">The tray is rendered from the backend environment state.</p>
+          </div>
+
+          <div id="pieces" class="grid gap-4"></div>
+
+          <div class="mt-auto grid gap-3">
+            <button id="stepBtn" class="rounded-2xl bg-cyan-400 px-5 py-3 font-bold text-slate-950 shadow-lg shadow-cyan-950/40 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
+              Let AI Play Turn
+            </button>
+
+            <button id="resetBtn" class="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/15">
+              Reset Game
+            </button>
+
+            <label class="flex cursor-pointer items-center justify-between rounded-2xl border border-white/10 bg-slate-900/80 p-4">
+              <span>
+                <span class="block font-semibold">Auto-Play AI</span>
+                <span class="text-sm text-slate-400">Calls /api/ai_move every 500ms.</span>
+              </span>
+              <input id="autoToggle" type="checkbox" class="h-6 w-6 accent-cyan-400" />
+            </label>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const boardEl = document.getElementById("board");
+      const piecesEl = document.getElementById("pieces");
+      const scoreEl = document.getElementById("score");
+      const rewardEl = document.getElementById("reward");
+      const actionEl = document.getElementById("action");
+      const statusEl = document.getElementById("status");
+      const stepBtn = document.getElementById("stepBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const autoToggle = document.getElementById("autoToggle");
+
+      let autoTimer = null;
+      let busy = false;
+
+      function cellClasses(value, row, col) {
+        const heavyRight = col === 2 || col === 5 ? "border-r-4 border-r-slate-500" : "border-r border-r-slate-700";
+        const heavyBottom = row === 2 || row === 5 ? "border-b-4 border-b-slate-500" : "border-b border-b-slate-700";
+        const filled = value ? "bg-gradient-to-br from-cyan-300 to-blue-500 shadow-inner shadow-white/20" : "bg-slate-900/80";
+        return `aspect-square rounded-md ${filled} ${heavyRight} ${heavyBottom}`;
+      }
+
+      function renderBoard(board) {
+        boardEl.innerHTML = "";
+
+        board.forEach((row, rowIndex) => {
+          row.forEach((value, colIndex) => {
+            const cell = document.createElement("div");
+            cell.className = cellClasses(value, rowIndex, colIndex);
+            boardEl.appendChild(cell);
+          });
+        });
+      }
+
+      function renderPiece(piece, index) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "rounded-2xl border border-white/10 bg-slate-900/80 p-4";
+
+        const title = document.createElement("p");
+        title.className = "mb-3 text-sm font-semibold text-slate-300";
+        title.textContent = `Block ${index + 1}`;
+
+        const grid = document.createElement("div");
+        grid.className = "inline-grid gap-1 rounded-xl bg-slate-950/80 p-2";
+        grid.style.gridTemplateColumns = `repeat(${piece[0]?.length || 1}, minmax(0, 1.6rem))`;
+
+        piece.forEach((row) => {
+          row.forEach((value) => {
+            const cell = document.createElement("div");
+            cell.className = `h-6 w-6 rounded ${value ? "bg-amber-300 shadow shadow-amber-950/40" : "bg-transparent"}`;
+            grid.appendChild(cell);
+          });
+        });
+
+        wrapper.appendChild(title);
+        wrapper.appendChild(grid);
+        return wrapper;
+      }
+
+      function renderPieces(pieces) {
+        piecesEl.innerHTML = "";
+
+        if (!pieces.length) {
+          piecesEl.innerHTML = '<p class="rounded-2xl bg-slate-900/80 p-4 text-slate-400">No blocks remaining.</p>';
+          return;
+        }
+
+        pieces.forEach((piece, index) => {
+          piecesEl.appendChild(renderPiece(piece, index));
+        });
+      }
+
+      function renderState(data) {
+        renderBoard(data.board);
+        renderPieces(data.pieces);
+        scoreEl.textContent = data.score;
+        rewardEl.textContent = data.reward;
+        if (data.action === null || data.action === undefined) {
+          actionEl.textContent = data.predicted_action === null || data.predicted_action === undefined ? "-" : `predicted ${data.predicted_action}`;
+        } else if (data.action_was_valid === false) {
+          actionEl.textContent = `${data.action} (fallback for ${data.predicted_action})`;
+        } else {
+          actionEl.textContent = data.action;
+        }
+
+        if (data.game_over) {
+          statusEl.textContent = "Game Over";
+          statusEl.className = "font-semibold text-rose-300";
+        } else if (data.action_was_valid === false) {
+          statusEl.textContent = "AI chose invalid move; used valid fallback";
+          statusEl.className = "font-semibold text-amber-300";
+        } else {
+          statusEl.textContent = autoToggle.checked ? "Auto-playing" : "Ready";
+          statusEl.className = "font-semibold text-emerald-300";
+        }
+      }
+
+      async function postJson(url) {
+        const response = await fetch(url, { method: "POST" });
+
+        if (!response.ok) {
+          throw new Error(`${url} failed with ${response.status}`);
+        }
+
+        return response.json();
+      }
+
+      async function resetGame() {
+        stopAutoPlay(false);
+        setBusy(true);
+        try {
+          renderState(await postJson("/api/reset"));
+        } catch (error) {
+          showError(error);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function aiMove() {
+        if (busy) return;
+
+        setBusy(true);
+        try {
+          const data = await postJson("/api/ai_move");
+          renderState(data);
+
+          if (data.game_over && autoToggle.checked) {
+            setTimeout(async () => {
+              if (autoToggle.checked) {
+                renderState(await postJson("/api/reset"));
+              }
+            }, 700);
+          }
+        } catch (error) {
+          showError(error);
+          stopAutoPlay(true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function setBusy(value) {
+        busy = value;
+        stepBtn.disabled = value;
+        resetBtn.disabled = value;
+      }
+
+      function showError(error) {
+        statusEl.textContent = error.message;
+        statusEl.className = "font-semibold text-rose-300";
+      }
+
+      function startAutoPlay() {
+        if (autoTimer) return;
+        statusEl.textContent = "Auto-playing";
+        statusEl.className = "font-semibold text-emerald-300";
+        autoTimer = setInterval(aiMove, 500);
+      }
+
+      function stopAutoPlay(updateToggle) {
+        if (autoTimer) {
+          clearInterval(autoTimer);
+          autoTimer = null;
+        }
+
+        if (updateToggle) {
+          autoToggle.checked = false;
+        }
+      }
+
+      stepBtn.addEventListener("click", aiMove);
+      resetBtn.addEventListener("click", resetGame);
+      autoToggle.addEventListener("change", () => {
+        if (autoToggle.checked) {
+          startAutoPlay();
+        } else {
+          stopAutoPlay(false);
+          statusEl.textContent = "Ready";
+        }
+      });
+
+      resetGame();
+    </script>
+  </body>
+</html>

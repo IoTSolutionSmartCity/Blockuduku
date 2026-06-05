@@ -1,0 +1,17 @@
+import setuptools
+
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
+setuptools.setup(
+    name='gym-blocksudoku',
+    version='0.0.2',
+    author="Drakeor",
+    author_email="me@drakeor.com",
+    description="OpenAI Gym Environment for Block Sudoku",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/drakeor/gym-blocksudoku",
+    packages=setuptools.find_packages(),
+    install_requires=['gym', 'numpy']
+)
