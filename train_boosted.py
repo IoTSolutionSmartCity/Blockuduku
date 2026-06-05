@@ -4,6 +4,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from sb3_contrib import MaskablePPO
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
@@ -17,9 +18,13 @@ SURVIVAL_REWARD = 2.0
 BRICK_REWARD = 0.5
 LINE_CLEAR_REWARD = 25.0
 COMBO_BASE_REWARD = 10.0
-BOARD_FULLNESS_PENALTY = 0.5
+BOARD_FULLNESS_THRESHOLD = 0.70
+BOARD_FULLNESS_PENALTY = 0.25
 GAME_OVER_PENALTY = 20.0
 MAX_COMBO_MULTIPLIER = 8.0
+INITIAL_LEARNING_RATE = 3e-4
+FINAL_LEARNING_RATE = 3e-5
+ENTROPY_COEF = 0.015
 
 
 class StrategicBlockudokuEnv(gym.Env):
@@ -62,6 +67,8 @@ class StrategicBlockudokuEnv(gym.Env):
             selected_block=selected_block,
             placed_board=placed_board,
         )
+        info = dict(info)
+        info["score"] = float(self.base_env.total_score)
 
         return self._build_observation(), reward, bool(done), False, info
 
@@ -134,11 +141,12 @@ class StrategicBlockudokuEnv(gym.Env):
         lines_cleared = self._count_cleared_lines(placed_board)
         board_after = self._board()
         filled_cells = float(board_after.sum())
+        excess_filled_cells = max(0.0, filled_cells - (81.0 * BOARD_FULLNESS_THRESHOLD))
 
         reward = 0.0
         reward += SURVIVAL_REWARD if not done else 0.0
         reward += BRICK_REWARD * brick_count
-        reward -= BOARD_FULLNESS_PENALTY * filled_cells
+        reward -= BOARD_FULLNESS_PENALTY * excess_filled_cells
 
         if lines_cleared > 0:
             self.combo_streak += 1
@@ -179,6 +187,46 @@ def make_training_env():
     return VecNormalize(env, norm_obs=False, norm_reward=True, clip_reward=10.0)
 
 
+def linear_schedule(initial_value, final_value):
+    def schedule(progress_remaining):
+        return final_value + progress_remaining * (initial_value - final_value)
+
+    return schedule
+
+
+class AverageScoreCallback(BaseCallback):
+    def __init__(self):
+        super().__init__()
+        self.rollout_scores = []
+
+    def _on_step(self):
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+
+        for done, info in zip(dones, infos):
+            if done and "score" in info:
+                self.rollout_scores.append(float(info["score"]))
+
+        return True
+
+    def _on_rollout_end(self):
+        if not self.rollout_scores:
+            return
+
+        avg_score = float(np.mean(self.rollout_scores))
+        max_score = float(np.max(self.rollout_scores))
+        episodes = len(self.rollout_scores)
+
+        self.logger.record("score/avg_game_score", avg_score)
+        self.logger.record("score/max_game_score", max_score)
+        print(
+            f"[score] rollout_avg={avg_score:.2f} "
+            f"rollout_max={max_score:.2f} episodes={episodes}"
+        )
+
+        self.rollout_scores.clear()
+
+
 def main():
     print("Starting strategic MaskablePPO training from scratch...")
     print("Creating dict-observation env with action masking and VecNormalize rewards...")
@@ -194,8 +242,8 @@ def main():
         env,
         gamma=0.995,
         vf_coef=1.0,
-        ent_coef=0.03,
-        learning_rate=0.00025,
+        ent_coef=ENTROPY_COEF,
+        learning_rate=linear_schedule(INITIAL_LEARNING_RATE, FINAL_LEARNING_RATE),
         clip_range=0.2,
         n_steps=4096,
         batch_size=256,
@@ -206,7 +254,11 @@ def main():
     )
 
     print(f"Training for {TOTAL_TIMESTEPS:,} timesteps with strategic rewards...")
-    model.learn(total_timesteps=TOTAL_TIMESTEPS, progress_bar=True)
+    model.learn(
+        total_timesteps=TOTAL_TIMESTEPS,
+        callback=AverageScoreCallback(),
+        progress_bar=True,
+    )
 
     model.save(MODEL_OUTPUT)
     env.save(VEC_NORMALIZE_OUTPUT)
