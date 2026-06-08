@@ -19,20 +19,19 @@ TENSORBOARD_LOG_DIR = "./blocksudoku_tensorboard/"
 MODEL_OUTPUT = "ppo_blockudoku_survival_v2"
 VEC_NORMALIZE_OUTPUT = "vecnormalize_blockudoku_survival_v2.pkl"
 
-# ========== REWARD CONSTANTS (designed for long survival) ==========
+# ========== REWARD CONSTANTS (Balanced for Stable Learning) ==========
 SURVIVAL_REWARD = 2.0                 # per step alive
-# Instead of a small positive openness reward, use a continuous penalty for fullness
 FULLNESS_PENALTY_SCALE = 5.0          # penalty when board >50% full (quadratic)
-LINE_CLEAR_REWARD = 500.0             # per cleared line (increased from 100)
-NEAR_COMPLETE_REWARD = 100.0          # per line with 7 or 8 filled cells (increased from 20)
-POST_CLEAR_OPEN_BONUS = 20.0          # bonus * open_ratio after clearing lines
-OPEN_SQUARE_REWARD = 5.0              # per 3x3 square with ≤2 filled cells
-LONG_LANE_REWARD = 5.0                # per lane (row/col) of length ≥5 (normalised)
-VALID_ACTION_REWARD = 0.1             # per valid move after placement (scaled)
-ISOLATED_HOLE_PENALTY = 10.0          # per isolated hole (cell surrounded by filled cells)
-USELESS_PLACEMENT_PENALTY = 0.5       # per brick placed without progress
-GAME_OVER_PENALTY = 200.0
-BRICK_PLACEMENT_REWARD = 0.2          # positive reward for placing bricks that help progress
+LINE_CLEAR_REWARD = 50.0              # REDUCED from 500.0 to prevent exploding gradients
+NEAR_COMPLETE_REWARD = 10.0           # REDUCED from 100.0
+POST_CLEAR_OPEN_BONUS = 5.0           # REDUCED from 20.0
+OPEN_SQUARE_REWARD = 2.0              # REDUCED from 5.0
+LONG_LANE_REWARD = 2.0                # REDUCED from 5.0
+VALID_ACTION_REWARD = 0.5             # INCREASED to heavily value keeping options open
+FRAGMENTATION_PENALTY = 2.0           # NEW: penalizes jagged, uneven board states
+GAME_OVER_PENALTY = 200.0             # Keeps the strong cliff for dying
+BRICK_PLACEMENT_REWARD = 0.5          # Base reward for placing a piece safely
+# USELESS_PLACEMENT_PENALTY is completely removed
 
 # ========== EXPLORATION & TRAINING ==========
 LEARNING_RATE = 1e-4                  # lower, more stable
@@ -290,25 +289,25 @@ class LongSurvivalBlockudokuEnv(gym.Env):
                     count += 1
         return count
 
-    def _isolated_hole_count(self, board):
-        # Empty cell completely surrounded by filled cells (or edges)
-        holes = 0
+    def _fragmentation_count(self, board):
+        """
+        Calculates board roughness by counting transitions from filled to empty cells
+        across all rows and columns. High transitions = highly fragmented board.
+        """
+        transitions = 0
+        # Check horizontal transitions (row by row)
         for row in range(9):
-            for col in range(9):
-                if board[row, col] != 0:
-                    continue
-                # Check four orthogonal neighbors
-                surrounded = True
-                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
-                    nr, nc = row+dr, col+dc
-                    if 0 <= nr < 9 and 0 <= nc < 9:
-                        if board[nr, nc] == 0:
-                            surrounded = False
-                            break
-                    # edge counts as filled (blocked)
-                if surrounded:
-                    holes += 1
-        return holes
+            for col in range(8):
+                if board[row, col] != board[row, col + 1]:
+                    transitions += 1
+                    
+        # Check vertical transitions (col by col)
+        for col in range(9):
+            for row in range(8):
+                if board[row, col] != board[row + 1, col]:
+                    transitions += 1
+                    
+        return transitions
 
     def _dense_survival_reward(self, done, placed_board, selected_block, board_before):
         reward = SURVIVAL_REWARD
@@ -335,7 +334,9 @@ class LongSurvivalBlockudokuEnv(gym.Env):
 
         lines_cleared = self._count_cleared_lines(placed_board)
         if lines_cleared > 0:
-            reward += LINE_CLEAR_REWARD * lines_cleared
+            combo_multiplier = 1.0 + (lines_cleared - 1) * 0.5
+
+            reward += (LINE_CLEAR_REWARD * lines_cleared) * combo_multiplier
             # Bonus for how open the board becomes after clears
             reward += POST_CLEAR_OPEN_BONUS * open_ratio
 
@@ -352,16 +353,16 @@ class LongSurvivalBlockudokuEnv(gym.Env):
         reward += VALID_ACTION_REWARD * (valid_actions / 10.0)   # scaled
 
         # ---- Penalties ----
-        isolated_holes = self._isolated_hole_count(board_after)
-        reward -= ISOLATED_HOLE_PENALTY * isolated_holes
+        # Calculate board roughness instead of strict 1x1 isolated holes
+        fragmentation = self._fragmentation_count(board_after)
+        # Scale the penalty down slightly so it doesn't overpower survival early on
+        reward -= FRAGMENTATION_PENALTY * (fragmentation / 10.0)
 
-        # Penalise placing bricks that do not contribute to progress
+        # Reward placing bricks safely. 
+        # By removing the useless placement penalty, the agent is no longer punished
+        # for making mandatory setup moves in the early game.
         bricks_placed = int(np.sum(selected_block > 0))
-        if lines_cleared == 0 and near_complete == 0:
-            reward -= USELESS_PLACEMENT_PENALTY * bricks_placed
-        else:
-            # Slight positive for placing bricks that help
-            reward += BRICK_PLACEMENT_REWARD * bricks_placed
+        reward += BRICK_PLACEMENT_REWARD * bricks_placed
 
         # ---- Death penalty that depends on how full the board is ----
         if done:
@@ -455,8 +456,6 @@ def main():
     print(f"  +{OPEN_SQUARE_REWARD} per open 3x3 square")
     print(f"  +{LONG_LANE_REWARD} * (longest_lane/9)")
     print(f"  +{VALID_ACTION_REWARD} * (valid_moves/10)")
-    print(f"  -{ISOLATED_HOLE_PENALTY} per isolated hole")
-    print(f"  -{USELESS_PLACEMENT_PENALTY} per brick placed without progress")
     print(f"  Death penalty depends on final open ratio (0.1→1000, 0.9→50)")
     print(f"Observation includes board, shapes, open_ratio, longest_lane, valid_action_ratio.")
     print(f"Learning rate: {LEARNING_RATE} (constant), entropy coef: {ENTROPY_COEF}")
