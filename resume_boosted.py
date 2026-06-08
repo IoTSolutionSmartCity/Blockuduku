@@ -19,7 +19,7 @@ SOURCE_MODEL = "ppo_blockudoku_survival_v2"
 OUTPUT_MODEL = "ppo_blockudoku_survival_v3"
 VEC_NORMALIZE_OUTPUT_V3 = "vecnormalize_blockudoku_survival_v3.pkl"
 
-ADDITIONAL_TIMESTEPS = 3_000_000
+ADDITIONAL_TIMESTEPS = 5_000_000
 
 
 def main():

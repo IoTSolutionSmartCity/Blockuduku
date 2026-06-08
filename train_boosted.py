@@ -20,15 +20,15 @@ MODEL_OUTPUT = "ppo_blockudoku_survival_v2"
 VEC_NORMALIZE_OUTPUT = "vecnormalize_blockudoku_survival_v2.pkl"
 
 # ========== REWARD CONSTANTS (Balanced for Stable Learning) ==========
-SURVIVAL_REWARD = 2.0                 # per step alive
-FULLNESS_PENALTY_SCALE = 5.0          # penalty when board >50% full (quadratic)
+SURVIVAL_REWARD = 5.0                 # per step alive
+FULLNESS_PENALTY_SCALE = 2.0          # penalty when board >50% full (quadratic)
 LINE_CLEAR_REWARD = 50.0              # REDUCED from 500.0 to prevent exploding gradients
 NEAR_COMPLETE_REWARD = 10.0           # REDUCED from 100.0
 POST_CLEAR_OPEN_BONUS = 5.0           # REDUCED from 20.0
 OPEN_SQUARE_REWARD = 2.0              # REDUCED from 5.0
 LONG_LANE_REWARD = 2.0                # REDUCED from 5.0
 VALID_ACTION_REWARD = 0.5             # INCREASED to heavily value keeping options open
-FRAGMENTATION_PENALTY = 2.0           # NEW: penalizes jagged, uneven board states
+FRAGMENTATION_PENALTY = 0.5           # NEW: penalizes jagged, uneven board states
 GAME_OVER_PENALTY = 200.0             # Keeps the strong cliff for dying
 BRICK_PLACEMENT_REWARD = 0.5          # Base reward for placing a piece safely
 # USELESS_PLACEMENT_PENALTY is completely removed
@@ -323,8 +323,8 @@ class LongSurvivalBlockudokuEnv(gym.Env):
         filled_ratio = 1.0 - open_ratio
 
         # Continuous penalty when board is more than half full
-        if filled_ratio > 0.5:
-            fullness_penalty = FULLNESS_PENALTY_SCALE * (filled_ratio - 0.5) ** 2
+        if filled_ratio > 0.7:
+            fullness_penalty = FULLNESS_PENALTY_SCALE * (filled_ratio - 0.7) ** 2
             reward -= fullness_penalty
 
         # ---- Line progress and clears ----
